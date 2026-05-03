@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YouTube Activity Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0d0d0d; --surface:#161616; --surface2:#1e1e1e;
+    --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.14);
+    --text:#f0f0f0; --muted:#888; --hint:#555;
+    --red:#ff0000; --blue:#378ADD; --green:#1D9E75;
+    --amber:#EF9F27; --pink:#D4537E; --purple:#8B5CF6;
+    --radius:8px; --radius-lg:12px;
+  }
+  body { background:var(--bg); color:var(--text); font-family:'DM Mono',monospace; font-size:13px; line-height:1.6; min-height:100vh; }
+  .shell { display:flex; min-height:100vh; }
+
+  /* ── Sidebar ── */
+  .sidebar { width:240px; flex-shrink:0; background:var(--surface); border-right:0.5px solid var(--border); display:flex; flex-direction:column; position:sticky; top:0; height:100vh; overflow-y:auto; }
+  .sidebar-logo { display:flex; align-items:center; gap:10px; padding:20px 18px 16px; border-bottom:0.5px solid var(--border); }
+  .logo-icon { width:28px; height:28px; background:var(--red); border-radius:6px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .logo-icon svg { width:14px; height:14px; }
+  .logo-text { font-family:'Instrument Serif',serif; font-size:15px; line-height:1.2; }
+  .logo-sub { font-size:9px; color:var(--hint); letter-spacing:0.08em; text-transform:uppercase; }
+  .sidebar-section { padding:14px 12px 6px; font-size:9px; color:var(--hint); letter-spacing:0.1em; text-transform:uppercase; }
+  .sidebar-video { display:flex; align-items:flex-start; gap:8px; padding:9px 14px; cursor:pointer; border-left:2px solid transparent; transition:background 0.12s; }
+  .sidebar-video:hover { background:var(--surface2); }
+  .sidebar-video.active { border-left-color:var(--red); background:var(--surface2); }
+  .sidebar-video-dot { width:6px; height:6px; border-radius:50%; background:var(--hint); flex-shrink:0; margin-top:5px; }
+  .sidebar-video.active .sidebar-video-dot { background:var(--red); }
+  .sidebar-video-title { font-size:11px; color:var(--muted); line-height:1.4; }
+  .sidebar-video.active .sidebar-video-title { color:var(--text); }
+  .sidebar-video-eng { font-size:10px; color:var(--hint); margin-top:2px; }
+  .sidebar-footer { margin-top:auto; padding:14px; border-top:0.5px solid var(--border); }
+  .status-pill { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--hint); }
+  .status-dot.live { background:#22c55e; box-shadow:0 0 0 2px rgba(34,197,94,0.2); }
+  .status-dot.loading { background:var(--amber); animation:blink 0.7s infinite alternate; }
+  .status-dot.error { background:#ef4444; }
+  @keyframes blink { from{opacity:0.3}to{opacity:1} }
+
+  /* ── Main ── */
+  .main { flex:1; padding:28px 32px; overflow-x:hidden; }
+  .page-header { margin-bottom:24px; }
+  .page-header h1 { font-family:'Instrument Serif',serif; font-size:26px; font-weight:400; }
+  .page-header p { font-size:11px; color:var(--hint); margin-top:4px; }
+
+  /* ── Analyze bar ── */
+  .analyze-bar { display:flex; gap:8px; margin-bottom:28px; }
+  .analyze-bar input { flex:1; background:var(--surface); border:0.5px solid var(--border2); border-radius:var(--radius); padding:9px 14px; color:var(--text); font-family:'DM Mono',monospace; font-size:12px; outline:none; transition:border-color 0.15s; }
+  .analyze-bar input:focus { border-color:var(--blue); }
+  .analyze-bar input::placeholder { color:var(--hint); }
+  .analyze-bar button { background:var(--red); border:none; border-radius:var(--radius); padding:9px 20px; color:#fff; font-family:'DM Mono',monospace; font-size:12px; font-weight:500; cursor:pointer; white-space:nowrap; transition:opacity 0.15s; }
+  .analyze-bar button:hover { opacity:0.85; }
+  .analyze-bar button:disabled { opacity:0.4; cursor:not-allowed; }
+
+  /* ── Live result card ── */
+  .live-card { background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; margin-bottom:28px; display:none; }
+  .live-card.visible { display:block; }
+  .live-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
+  .live-card-title { font-family:'Instrument Serif',serif; font-size:17px; line-height:1.4; }
+  .live-card-channel { font-size:11px; color:var(--muted); margin-top:2px; }
+  .insight-badge { flex-shrink:0; font-size:11px; font-weight:500; padding:5px 12px; border-radius:20px; white-space:nowrap; }
+  .insight-badge.high    { background:#052e16; color:#4ade80; border:0.5px solid #166534; }
+  .insight-badge.average { background:#422006; color:#fbbf24; border:0.5px solid #854d0e; }
+  .insight-badge.low     { background:#450a0a; color:#f87171; border:0.5px solid #991b1b; }
+  .live-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+  .live-stat { background:var(--surface2); border-radius:var(--radius); padding:12px; }
+  .live-stat-lbl { font-size:9px; color:var(--hint); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:5px; }
+  .live-stat-val { font-size:20px; font-weight:500; }
+
+  /* ── Gemini panel ── */
+  .gemini-panel { background:var(--surface2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; margin-top:14px; }
+  .gemini-panel-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .gemini-panel-label { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; }
+  .gemini-dot { width:7px; height:7px; border-radius:50%; background:var(--purple); }
+  .gemini-btn { background:transparent; border:0.5px solid var(--border2); border-radius:6px; padding:5px 12px; color:var(--muted); font-family:'DM Mono',monospace; font-size:10px; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; gap:6px; }
+  .gemini-btn:hover { background:var(--surface); color:var(--text); }
+  .gemini-btn:disabled { opacity:0.4; cursor:not-allowed; }
+  .gemini-btn .spin { display:inline-block; animation:spin 0.8s linear infinite; }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  .gemini-text { font-size:12px; color:var(--text); line-height:1.8; }
+  .gemini-placeholder { font-size:11px; color:var(--hint); font-style:italic; }
+
+  /* ── Section header ── */
+  .section-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .section-hdr h2 { font-family:'Instrument Serif',serif; font-size:17px; font-weight:400; }
+  .section-hdr span { font-size:10px; color:var(--hint); }
+
+  /* ── Metric & growth cards ── */
+  .metric-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:24px; }
+  .metric-card { background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px; }
+  .metric-card-lbl { font-size:9px; color:var(--hint); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px; }
+  .metric-card-val { font-size:22px; font-weight:500; }
+  .metric-card-delta { font-size:10px; margin-top:3px; }
+  .metric-card-delta.up   { color:#22c55e; }
+  .metric-card-delta.down { color:#ef4444; }
+  .metric-card-delta.flat { color:var(--hint); }
+  .growth-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:24px; }
+  .growth-card { background:var(--surface2); border-radius:var(--radius); padding:14px; }
+  .growth-card-title { font-size:9px; color:var(--hint); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .growth-card-val { font-size:20px; font-weight:500; }
+  .growth-card-sub { font-size:10px; color:var(--hint); margin-top:2px; }
+
+  /* ── Trend Gemini panel ── */
+  .trend-gemini { background:linear-gradient(135deg,#1a0d2e,#0d1a2e); border:0.5px solid rgba(139,92,246,0.3); border-radius:var(--radius-lg); padding:18px 20px; margin-bottom:24px; }
+  .trend-gemini-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .trend-gemini-title { display:flex; align-items:center; gap:8px; font-family:'Instrument Serif',serif; font-size:15px; }
+  .trend-gemini-sub { font-size:10px; color:#9d7fd4; margin-top:2px; }
+  .trend-gemini-text { font-size:12px; line-height:1.9; color:#e2d9f3; }
+  .trend-gemini-placeholder { font-size:11px; color:#6d5b8c; font-style:italic; }
+  .trend-gemini-btn { background:rgba(139,92,246,0.15); border:0.5px solid rgba(139,92,246,0.4); border-radius:6px; padding:7px 16px; color:#c4b5fd; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; gap:6px; }
+  .trend-gemini-btn:hover { background:rgba(139,92,246,0.25); }
+  .trend-gemini-btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+  /* ── Chart ── */
+  .chart-block { margin-bottom:28px; }
+  .chart-lbl { font-size:9px; color:var(--hint); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px; }
+  .chart-wrap { position:relative; width:100%; height:260px; }
+  .chart-wrap-sm { position:relative; width:100%; height:190px; }
+  .toggle-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .toggle-btn { display:flex; align-items:center; gap:5px; font-size:10px; font-family:'DM Mono',monospace; padding:4px 10px; border-radius:4px; border:0.5px solid var(--border2); background:transparent; color:var(--muted); cursor:pointer; transition:background 0.12s; }
+  .toggle-btn.on { background:var(--surface2); color:var(--text); }
+  .swatch { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+  .divider { border:none; border-top:0.5px solid var(--border); margin:28px 0; }
+
+  /* ── Empty state ── */
+  .empty-state { text-align:center; padding:60px 20px; color:var(--hint); }
+  .empty-state svg { margin-bottom:12px; opacity:0.4; }
+  .empty-state p { font-size:12px; margin-top:6px; }
+  /* ── Toast ── */
+  .toast { position:fixed; bottom:24px; right:24px; background:var(--surface2); border:0.5px solid rgba(34,197,94,0.4); border-radius:var(--radius); padding:12px 16px; font-size:11px; color:#4ade80; display:flex; align-items:center; gap:8px; box-shadow:0 4px 20px rgba(0,0,0,0.4); transform:translateY(80px); opacity:0; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); z-index:999; pointer-events:none; }
+  .toast.show { transform:translateY(0); opacity:1; }
+  .toast-dot { width:6px; height:6px; border-radius:50%; background:#4ade80; flex-shrink:0; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon"><svg viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg></div>
+      <div>
+        <div class="logo-text">YT Analyzer</div>
+        <div class="logo-sub">Activity Dashboard</div>
+      </div>
+    </div>
+    <div class="sidebar-section">Tracked videos</div>
+    <div id="sidebar-list"><div style="padding:14px;font-size:11px;color:var(--hint);">Loading…</div></div>
+    <div class="sidebar-footer">
+      <div class="status-pill">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Connecting…</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main">
+    <div class="page-header">
+      <h1>Activity Analyzer</h1>
+      <p>Historical trends · Live analysis · Gemini AI narrative</p>
+    </div>
+
+    <!-- Analyze bar -->
+    <div class="analyze-bar">
+      <input id="analyze-input" type="text" placeholder="Video ID or YouTube URL — press Enter to analyze…" />
+      <button id="analyze-btn" onclick="doAnalyze()">Analyze live</button>
+    </div>
+
+    <!-- Live result card -->
+    <div class="live-card" id="live-card">
+      <div class="live-card-top">
+        <div>
+          <div class="live-card-title" id="lc-title"></div>
+          <div class="live-card-channel" id="lc-channel"></div>
+        </div>
+        <div class="insight-badge" id="lc-badge"></div>
+      </div>
+      <div class="live-stats">
+        <div class="live-stat"><div class="live-stat-lbl">Views</div><div class="live-stat-val" id="lc-views">—</div></div>
+        <div class="live-stat"><div class="live-stat-lbl">Likes</div><div class="live-stat-val" id="lc-likes">—</div></div>
+        <div class="live-stat"><div class="live-stat-lbl">Comments</div><div class="live-stat-val" id="lc-comments">—</div></div>
+        <div class="live-stat"><div class="live-stat-lbl">Engagement</div><div class="live-stat-val" id="lc-eng">—</div></div>
+      </div>
+      <!-- Gemini narrative for live card -->
+      <div class="gemini-panel">
+        <div class="gemini-panel-hdr">
+          <div class="gemini-panel-label"><div class="gemini-dot"></div>Gemini AI Narrative</div>
+          <button class="gemini-btn" id="gemini-live-btn" onclick="fetchLiveNarrative()">
+            <span>✦</span> Generate insight
+          </button>
+        </div>
+        <div id="gemini-live-text" class="gemini-placeholder">Click "Generate insight" to get an AI-powered analysis of this video.</div>
+      </div>
+    </div>
+
+    <!-- Trend section -->
+    <div id="trend-section">
+      <div class="empty-state" id="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-4"/>
+        </svg>
+        <p>Select a tracked video from the sidebar to explore its trends</p>
+      </div>
+
+      <div id="video-detail" style="display:none;">
+        <div class="section-hdr">
+          <h2 id="detail-title"></h2>
+          <span id="detail-channel"></span>
+        </div>
+
+        <div class="metric-row" id="metric-row"></div>
+        <div class="growth-row" id="growth-row"></div>
+
+        <!-- Gemini trend narrative -->
+        <div class="trend-gemini">
+          <div class="trend-gemini-hdr">
+            <div>
+              <div class="trend-gemini-title">
+                <span style="color:#8B5CF6">✦</span> Gemini AI Analysis
+              </div>
+              <div class="trend-gemini-sub">Powered by historical tracking data + live stats</div>
+            </div>
+            <button class="trend-gemini-btn" id="gemini-trend-btn" onclick="fetchTrendNarrative()">
+              Generate narrative
+            </button>
+          </div>
+          <div id="gemini-trend-text" class="trend-gemini-placeholder">
+            Generate a narrative to get AI-powered insights combining your historical tracking data with live YouTube stats.
+          </div>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="chart-block">
+          <div class="chart-lbl">Views · Likes · Comments over time</div>
+          <div class="toggle-row">
+            <button class="toggle-btn on" data-m="views"    onclick="toggleLine(this)"><span class="swatch" style="background:#378ADD"></span>Views</button>
+            <button class="toggle-btn on" data-m="likes"    onclick="toggleLine(this)"><span class="swatch" style="background:#1D9E75"></span>Likes</button>
+            <button class="toggle-btn on" data-m="comments" onclick="toggleLine(this)"><span class="swatch" style="background:#EF9F27"></span>Comments</button>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-main"></canvas></div>
+        </div>
+
+        <div class="chart-block">
+          <div class="chart-lbl">Engagement rate (%) over time</div>
+          <div class="chart-wrap-sm"><canvas id="chart-eng"></canvas></div>
+        </div>
+
+        <div class="chart-block">
+          <div class="chart-lbl">View gain per session</div>
+          <div class="chart-wrap-sm"><canvas id="chart-delta"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const API = "http://127.0.0.1:8001";
+let trackingData = {};
+let activeId = null;
+let liveVideoId = null;
+let chartMain = null, chartEng = null, chartDelta = null;
+let visible = { views:true, likes:true, comments:true };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmt(n) {
+  if (n >= 1e9) return (n/1e9).toFixed(2)+'B';
+  if (n >= 1e6) return (n/1e6).toFixed(2)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return n.toLocaleString();
+}
+function fmtShort(iso) {
+  return new Date(iso).toLocaleDateString('en-IN',{month:'short',day:'numeric'});
+}
+function eng(pt) {
+  return pt.view_count > 0 ? (pt.like_count + pt.comment_count) / pt.view_count * 100 : 0;
+}
+function deltaClass(a,b) {
+  if (b==null) return 'flat';
+  return a>b?'up':a<b?'down':'flat';
+}
+function insightCls(s) {
+  s=(s||'').toLowerCase();
+  if (s.includes('high')) return 'high';
+  if (s.includes('average')) return 'average';
+  return 'low';
+}
+function setStatus(msg, state) {
+  document.getElementById('status-text').textContent = msg;
+  const dot = document.getElementById('status-dot');
+  dot.className = 'status-dot'+(state?' '+state:'');
+}
+function extractId(val) {
+  val = val.trim();
+  try {
+    const u = new URL(val);
+    if (u.hostname.includes('youtube.com')) return u.searchParams.get('v')||val;
+    if (u.hostname==='youtu.be') return u.pathname.slice(1);
+  } catch(_) {}
+  return val;
+}
+
+// ── Load tracking data ────────────────────────────────────────────────────────
+
+async function loadTracking() {
+  setStatus('Loading data…','loading');
+  try {
+    const res = await fetch(API+'/tracking');
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    trackingData = await res.json();
+    buildSidebar();
+    const ids = Object.keys(trackingData);
+    if (ids.length) selectVideo(ids[0]);
+    setStatus('Backend connected','live');
+  } catch(e) {
+    setStatus('Backend offline','error');
+    document.getElementById('sidebar-list').innerHTML =
+      '<div style="padding:14px;font-size:11px;color:var(--hint);">Cannot reach backend.<br>Run: uvicorn app:app --reload --port 8001</div>';
+  }
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
+function buildSidebar() {
+  const list = document.getElementById('sidebar-list');
+  const ids = Object.keys(trackingData);
+  if (!ids.length) {
+    list.innerHTML = '<div style="padding:14px;font-size:11px;color:var(--hint);">No tracked videos yet.<br>Run youtube_data.py first.</div>';
+    return;
+  }
+  list.innerHTML = ids.map(id => {
+    const pts = trackingData[id];
+    const latest = pts[pts.length-1];
+    const title = latest?.title || id;
+    const rate = eng(latest).toFixed(2);
+    return `<div class="sidebar-video" data-id="${id}" onclick="selectVideo('${id}')">
+      <div class="sidebar-video-dot"></div>
+      <div>
+        <div class="sidebar-video-title">${title.length>34?title.slice(0,34)+'…':title}</div>
+        <div class="sidebar-video-eng">${rate}% · ${pts.length} data pts</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Select tracked video ──────────────────────────────────────────────────────
+
+function selectVideo(id) {
+  activeId = id;
+  document.querySelectorAll('.sidebar-video').forEach(el => {
+    el.classList.toggle('active', el.dataset.id===id);
+  });
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('video-detail').style.display = 'block';
+  // Reset Gemini panel for new video
+  document.getElementById('gemini-trend-text').className = 'trend-gemini-placeholder';
+  document.getElementById('gemini-trend-text').textContent = 'Generate a narrative to get AI-powered insights combining your historical tracking data with live YouTube stats.';
+  document.getElementById('gemini-trend-btn').disabled = false;
+  document.getElementById('gemini-trend-btn').textContent = 'Generate narrative';
+  renderDetail(id);
+}
+
+// ── Render detail charts + cards ──────────────────────────────────────────────
+
+function renderDetail(id) {
+  const pts = trackingData[id];
+  if (!pts?.length) return;
+
+  const latest = pts[pts.length-1];
+  const prev   = pts.length>1 ? pts[pts.length-2] : null;
+  const first  = pts[0];
+
+  document.getElementById('detail-title').textContent =
+    latest.title.length>60 ? latest.title.slice(0,60)+'…' : latest.title;
+  document.getElementById('detail-channel').textContent = latest.channel_title||'';
+
+  const engNow  = eng(latest);
+  const engPrev = prev ? eng(prev) : null;
+
+  // Metric cards
+  document.getElementById('metric-row').innerHTML = [
+    { lbl:'Views',      val:fmt(latest.view_count),    raw:latest.view_count,    prevRaw:prev?.view_count,    isFloat:false },
+    { lbl:'Likes',      val:fmt(latest.like_count),    raw:latest.like_count,    prevRaw:prev?.like_count,    isFloat:false },
+    { lbl:'Comments',   val:fmt(latest.comment_count), raw:latest.comment_count, prevRaw:prev?.comment_count, isFloat:false },
+    { lbl:'Engagement', val:engNow.toFixed(2)+'%',     raw:engNow,               prevRaw:engPrev,             isFloat:true  },
+  ].map(m => {
+    const dc = deltaClass(m.raw, m.prevRaw);
+    const diff = m.prevRaw!=null ? m.raw-m.prevRaw : null;
+    const dStr = diff!=null
+      ? (diff>=0?'+':'')+( m.isFloat ? diff.toFixed(3)+'%' : fmt(Math.abs(diff)) )
+      : '';
+    return `<div class="metric-card">
+      <div class="metric-card-lbl">${m.lbl}</div>
+      <div class="metric-card-val">${m.val}</div>
+      ${dStr?`<div class="metric-card-delta ${dc}">${dStr} since last</div>`:''}
+    </div>`;
+  }).join('');
+
+  // Growth cards
+  const totalGrowth = latest.view_count - first.view_count;
+  const days = Math.max(1,(new Date(latest.timestamp)-new Date(first.timestamp))/86400000);
+  document.getElementById('growth-row').innerHTML = [
+    { title:'Total view growth', val:'+'+fmt(totalGrowth),            sub:'since first recorded' },
+    { title:'Avg views / day',   val:fmt(Math.round(totalGrowth/days)), sub:'over tracking period' },
+    { title:'Tracking span',     val:Math.round(days)+' days',        sub:fmtShort(first.timestamp)+' → '+fmtShort(latest.timestamp) },
+    { title:'Data points',       val:pts.length,                       sub:'recorded sessions' },
+  ].map(c=>`<div class="growth-card">
+    <div class="growth-card-title">${c.title}</div>
+    <div class="growth-card-val">${c.val}</div>
+    <div class="growth-card-sub">${c.sub}</div>
+  </div>`).join('');
+
+  // Charts
+  const labels   = pts.map(p => fmtShort(p.timestamp));
+  const views    = pts.map(p => p.view_count);
+  const likes    = pts.map(p => p.like_count);
+  const comments = pts.map(p => p.comment_count);
+  const engs     = pts.map(p => +eng(p).toFixed(4));
+  const deltas   = pts.map((p,i) => i===0?0:p.view_count-pts[i-1].view_count);
+
+  const gridColor = 'rgba(255,255,255,0.06)';
+  const tickColor = '#666';
+  const tickFont  = {size:11, family:'DM Mono'};
+
+  if (chartMain) chartMain.destroy();
+  chartMain = new Chart(document.getElementById('chart-main'),{
+    type:'line',
+    data:{ labels, datasets:[
+      {label:'Views',    data:views,    borderColor:'#378ADD',backgroundColor:'#378ADD18',tension:0.35,pointRadius:3,borderDash:[],   hidden:!visible.views   },
+      {label:'Likes',    data:likes,    borderColor:'#1D9E75',backgroundColor:'#1D9E7518',tension:0.35,pointRadius:3,borderDash:[4,3],hidden:!visible.likes   },
+      {label:'Comments', data:comments, borderColor:'#EF9F27',backgroundColor:'#EF9F2718',tension:0.35,pointRadius:3,borderDash:[1,3],hidden:!visible.comments},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:tickColor,font:tickFont,maxRotation:45},grid:{color:gridColor}},
+        y:{ticks:{color:tickColor,font:tickFont,callback:v=>fmt(v)},grid:{color:gridColor}}
+      }}
+  });
+
+  if (chartEng) chartEng.destroy();
+  chartEng = new Chart(document.getElementById('chart-eng'),{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Engagement %',data:engs,borderColor:'#D4537E',backgroundColor:'#D4537E18',tension:0.35,pointRadius:3,fill:true}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:tickColor,font:tickFont,maxRotation:45},grid:{color:gridColor}},
+        y:{ticks:{color:tickColor,font:tickFont,callback:v=>v.toFixed(2)+'%'},grid:{color:gridColor}}
+      }}
+  });
+
+  if (chartDelta) chartDelta.destroy();
+  chartDelta = new Chart(document.getElementById('chart-delta'),{
+    type:'bar',
+    data:{labels:labels.slice(1),datasets:[{
+      label:'View gain',data:deltas.slice(1),
+      backgroundColor:deltas.slice(1).map(d=>d>=0?'#378ADD55':'#ef444455'),
+      borderColor:     deltas.slice(1).map(d=>d>=0?'#378ADD'  :'#ef4444'),
+      borderWidth:1
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:tickColor,font:tickFont,maxRotation:45},grid:{color:gridColor}},
+        y:{ticks:{color:tickColor,font:tickFont,callback:v=>fmt(v)},grid:{color:gridColor}}
+      }}
+  });
+}
+
+// ── Toggle chart lines ────────────────────────────────────────────────────────
+
+function toggleLine(btn) {
+  const m = btn.dataset.m;
+  btn.classList.toggle('on');
+  visible[m] = btn.classList.contains('on');
+  if (chartMain) {
+    const idx = {views:0,likes:1,comments:2}[m];
+    chartMain.data.datasets[idx].hidden = !visible[m];
+    chartMain.update();
+  }
+}
+
+// ── Live analyze ──────────────────────────────────────────────────────────────
+
+async function doAnalyze() {
+  const raw = document.getElementById('analyze-input').value;
+  const videoId = extractId(raw);
+  if (!videoId) return;
+  liveVideoId = videoId;
+
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = true; btn.textContent = 'Fetching…';
+  setStatus('Fetching '+videoId+'…','loading');
+
+  // Reset Gemini live panel
+  document.getElementById('gemini-live-text').className = 'gemini-placeholder';
+  document.getElementById('gemini-live-text').textContent = 'Click "Generate insight" to get an AI-powered analysis of this video.';
+  document.getElementById('gemini-live-btn').disabled = false;
+  document.getElementById('gemini-live-btn').innerHTML = '<span>✦</span> Generate insight';
+
+  try {
+    const res = await fetch(API+'/analyze',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({video_id:videoId})
+    });
+    if (!res.ok) { const e=await res.json().catch(()=>({})); setStatus('Error: '+(e.detail||res.status),'error'); return; }
+    const data = await res.json();
+    showLiveCard(data);
+    setStatus('Live analysis loaded','live');
+  } catch(e) {
+    setStatus('Cannot reach backend','error');
+  } finally {
+    btn.disabled=false; btn.textContent='Analyze live';
+  }
+}
+
+function showLiveCard(data) {
+  document.getElementById('live-card').classList.add('visible');
+  document.getElementById('lc-title').textContent = data.title;
+  document.getElementById('lc-channel').textContent = data.channel;
+  document.getElementById('lc-views').textContent    = fmt(data.views);
+  document.getElementById('lc-likes').textContent    = fmt(data.likes);
+  document.getElementById('lc-comments').textContent = fmt(data.comments);
+  document.getElementById('lc-eng').textContent      = data.engagement_rate.toFixed(2)+'%';
+  const badge = document.getElementById('lc-badge');
+  badge.className = 'insight-badge '+insightCls(data.insight);
+  badge.textContent = data.insight;
+}
+
+// ── Gemini: live card ─────────────────────────────────────────────────────────
+
+async function fetchLiveNarrative() {
+  if (!liveVideoId) return;
+  const btn = document.getElementById('gemini-live-btn');
+  const textEl = document.getElementById('gemini-live-text');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin">◌</span> Generating…';
+  textEl.className = 'gemini-placeholder';
+  textEl.textContent = 'Gemini is analyzing this video…';
+
+  try {
+    const res = await fetch(API+'/narrative',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({video_id:liveVideoId})
+    });
+    const data = await res.json();
+    if (!res.ok) { textEl.textContent = '⚠ '+( data.detail||'Gemini error'); return; }
+    textEl.className = 'gemini-text';
+    textEl.textContent = data.narrative;
+    btn.innerHTML = '<span>✦</span> Regenerate';
+  } catch(e) {
+    textEl.textContent = '⚠ Cannot reach /narrative endpoint';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Gemini: trend panel ───────────────────────────────────────────────────────
+
+async function fetchTrendNarrative() {
+  if (!activeId) return;
+  const btn = document.getElementById('gemini-trend-btn');
+  const textEl = document.getElementById('gemini-trend-text');
+  btn.disabled = true;
+  btn.textContent = '◌ Generating…';
+  textEl.className = 'trend-gemini-placeholder';
+  textEl.textContent = 'Gemini is reading your tracking history and generating a narrative…';
+
+  try {
+    const res = await fetch(API+'/narrative',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({video_id:activeId})
+    });
+    const data = await res.json();
+    if (!res.ok) { textEl.textContent = '⚠ '+(data.detail||'Gemini error'); return; }
+    textEl.className = 'trend-gemini-text';
+    textEl.textContent = data.narrative;
+    btn.textContent = 'Regenerate';
+  } catch(e) {
+    textEl.textContent = '⚠ Cannot reach /narrative endpoint. Is GEMINI_API_KEY set in .env?';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('analyze-input').addEventListener('keydown', e => {
+  if (e.key==='Enter') doAnalyze();
+});
+
+// ── Toast notification ───────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  document.getElementById("toast-msg").textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+// Poll /tracking every 6s to pick up new auto-tracked videos.
+// (chrome.runtime.onMessage doesn't work on backend-served pages,
+//  so polling is the correct approach here.)
+let lastVideoCount = 0;
+let lastSnapshotTotal = 0;
+
+async function pollTracking() {
+  try {
+    const res = await fetch(API + '/tracking');
+    if (!res.ok) return;
+    const fresh = await res.json();
+    const ids = Object.keys(fresh);
+    const snapshotTotal = ids.reduce((sum, id) => sum + (fresh[id]?.length || 0), 0);
+
+    // Show toast only if new data arrived
+    if (snapshotTotal > lastSnapshotTotal && lastSnapshotTotal > 0) {
+      const newId = ids.find(id => !trackingData[id] || fresh[id].length > (trackingData[id]?.length || 0));
+      if (newId) {
+        const latest = fresh[newId][fresh[newId].length - 1];
+        const title = latest?.title || newId;
+        showToast("✅ Tracked: " + (title.length > 40 ? title.slice(0,40)+"…" : title) + " (" + fresh[newId].length + " snapshots)");
+      }
+    }
+
+    // Rebuild sidebar if video count changed
+    if (ids.length !== lastVideoCount || snapshotTotal !== lastSnapshotTotal) {
+      const prevActiveId = activeId;
+      trackingData = fresh;
+      lastVideoCount = ids.length;
+      lastSnapshotTotal = snapshotTotal;
+      buildSidebar();
+      // Re-select the active video if it still exists
+      if (prevActiveId && trackingData[prevActiveId]) {
+        selectVideo(prevActiveId);
+      } else if (ids.length && !activeId) {
+        selectVideo(ids[0]);
+      }
+    }
+  } catch(_) { /* backend offline, skip */ }
+}
+
+loadTracking();
+setInterval(pollTracking, 6000); // poll every 6 seconds
+</script>
+<div class="toast" id="toast"><div class="toast-dot"></div><span id="toast-msg"></span></div>
+</body>
+</html>
